@@ -61,10 +61,6 @@
         color: #ffadad;
       }
 
-      .hud .status-info {
-        color: #9dc1ff;
-      }
-
       a {
         color: #9dc1ff;
         text-decoration: none;
@@ -97,10 +93,9 @@
         const API_URL = "https://api.celestek.com/v1/satellites/starlink";
         const REFRESH_INTERVAL = 60_000;
 
-        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setPixelRatio(window.devicePixelRatio);
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setClearColor(0x000000, 0);
         document.body.appendChild(renderer.domElement);
 
         const scene = new THREE.Scene();
@@ -195,19 +190,6 @@
         const satelliteGeometry = new THREE.SphereGeometry(0.08, 8, 8);
         const satelliteMaterial = new THREE.MeshBasicMaterial({ color: 0xffc857 });
 
-        const FALLBACK_SATELLITES = [
-          { id: "fallback-1", latitude: 34.05, longitude: -118.25, altitudeKm: 550 },
-          { id: "fallback-2", latitude: -12.05, longitude: 96.88, altitudeKm: 555 },
-          { id: "fallback-3", latitude: 48.85, longitude: 2.35, altitudeKm: 545 },
-          { id: "fallback-4", latitude: 1.35, longitude: 103.82, altitudeKm: 560 },
-          { id: "fallback-5", latitude: 35.68, longitude: 139.69, altitudeKm: 540 },
-          { id: "fallback-6", latitude: -33.87, longitude: 151.21, altitudeKm: 565 }
-        ];
-
-        const statusElement = document.getElementById("status-message");
-        const lastUpdateElement = document.getElementById("last-update");
-        let lastSuccessfulFetch = null;
-
         function latLonAltToVector3(lat, lon, altitudeKm) {
           const phi = (90 - lat) * (Math.PI / 180);
           const theta = (lon + 180) * (Math.PI / 180);
@@ -248,6 +230,7 @@
           satellites.forEach((mesh, id) => {
             if (!activeIds.has(id)) {
               satelliteGroup.remove(mesh);
+              mesh.geometry.dispose();
               mesh.material.dispose();
               satellites.delete(id);
             }
@@ -257,9 +240,10 @@
         }
 
         async function fetchSatellitePositions() {
+          const statusElement = document.getElementById("status-message");
           try {
             statusElement.textContent = "";
-            statusElement.classList.remove("status-error", "status-info");
+            statusElement.classList.remove("status-error");
             const response = await fetch(API_URL, { cache: "no-store" });
             if (!response.ok) {
               throw new Error(`HTTP ${response.status} – ${response.statusText}`);
@@ -270,18 +254,10 @@
               : payload.satellites || payload.results || payload.data || [];
             updateSatellites(constellation);
             const timestamp = new Date();
-            lastSuccessfulFetch = timestamp;
-            lastUpdateElement.textContent = timestamp.toLocaleTimeString();
-            statusElement.textContent = "Live data from Celestek";
-            statusElement.classList.add("status-info");
+            document.getElementById("last-update").textContent = timestamp.toLocaleTimeString();
           } catch (error) {
             console.error("Failed to fetch satellite data", error);
-            if (!lastSuccessfulFetch) {
-              updateSatellites(FALLBACK_SATELLITES);
-              lastUpdateElement.textContent = "Showing sample orbit";
-            }
-            statusElement.textContent =
-              "Unable to refresh live satellite positions right now. Displaying cached data.";
+            statusElement.textContent = "Unable to refresh live satellite positions right now.";
             statusElement.classList.add("status-error");
           }
         }
