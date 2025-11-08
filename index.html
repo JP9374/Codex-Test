@@ -1,96 +1,603 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>3D Cube by Codex</title>
-  <style>
-    :root {
-      color-scheme: dark;
-    }
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Starlink Constellation Globe</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
 
-    body {
-      margin: 0;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: radial-gradient(circle at top, #1a237e, #0d1321 65%);
-      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-      color: #f5f7ff;
-    }
+      * {
+        box-sizing: border-box;
+      }
 
-    .scene {
-      width: 220px;
-      height: 220px;
-      perspective: 800px;
-    }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        color: #f5f7ff;
+        background: radial-gradient(circle at top, #0d1d3b, #02040f 70%);
+        overflow: hidden;
+      }
 
-    .cube {
-      width: 100%;
-      height: 100%;
-      position: relative;
-      transform-style: preserve-3d;
-      animation: rotate 7s infinite linear;
-    }
+      canvas {
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100vh;
+        display: block;
+      }
 
-    .face {
-      position: absolute;
-      width: 200px;
-      height: 200px;
-      left: 50%;
-      top: 50%;
-      margin: -100px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.3rem;
-      letter-spacing: 0.08em;
-      background: linear-gradient(135deg, rgba(63, 81, 181, 0.9), rgba(26, 35, 126, 0.9));
-      border: 2px solid rgba(197, 202, 233, 0.45);
-      box-shadow: inset 0 0 25px rgba(255, 255, 255, 0.12);
-      backdrop-filter: blur(4px);
-    }
+      .hud {
+        position: fixed;
+        top: 16px;
+        left: 16px;
+        padding: 12px 16px;
+        background: rgba(8, 16, 40, 0.65);
+        border: 1px solid rgba(108, 153, 255, 0.35);
+        border-radius: 12px;
+        backdrop-filter: blur(12px);
+        box-shadow: 0 10px 35px rgba(1, 5, 20, 0.45);
+        max-width: min(360px, calc(100vw - 32px));
+      }
 
-    .face::after {
-      content: "CODEX CREATED THIS FACE";
-    }
+      .hud h1 {
+        margin: 0 0 8px;
+        font-size: 1.1rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
 
-    .face.front  { transform: translateZ(100px); }
-    .face.back   { transform: rotateY(180deg) translateZ(100px); }
-    .face.right  { transform: rotateY(90deg) translateZ(100px); }
-    .face.left   { transform: rotateY(-90deg) translateZ(100px); }
-    .face.top    { transform: rotateX(90deg) translateZ(100px); }
-    .face.bottom { transform: rotateX(-90deg) translateZ(100px); }
+      .hud p {
+        margin: 4px 0;
+        font-size: 0.9rem;
+        line-height: 1.4;
+        color: rgba(226, 235, 255, 0.8);
+      }
 
-    @keyframes rotate {
-      0% { transform: rotateX(-20deg) rotateY(0deg); }
-      50% { transform: rotateX(340deg) rotateY(180deg); }
-      100% { transform: rotateX(700deg) rotateY(360deg); }
-    }
+      .hud p strong {
+        color: #8cb5ff;
+      }
 
-    .caption {
-      position: absolute;
-      bottom: 8vh;
-      width: 100%;
-      text-align: center;
-      font-size: 1rem;
-      letter-spacing: 0.2em;
-      text-transform: uppercase;
-      color: rgba(197, 202, 233, 0.8);
-    }
-  </style>
-</head>
-<body>
-  <div class="scene" aria-hidden="true">
-    <div class="cube">
-      <div class="face front"></div>
-      <div class="face back"></div>
-      <div class="face right"></div>
-      <div class="face left"></div>
-      <div class="face top"></div>
-      <div class="face bottom"></div>
+      .hud .status-error {
+        color: #ffadad;
+      }
+
+      .hud .status-info {
+        color: #9dc1ff;
+      }
+
+      a {
+        color: #9dc1ff;
+        text-decoration: none;
+      }
+
+      a:hover {
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="globe-canvas" role="presentation" aria-hidden="true"></canvas>
+    <div class="hud" aria-live="polite">
+      <h1>Starlink Constellation</h1>
+      <p>
+        Visualising live orbital positions of the Starlink satellites provided by the
+        <a href="https://celestek.space/" target="_blank" rel="noopener">Celestek API</a>.
+      </p>
+      <p><strong>Satellites tracked:</strong> <span id="satellite-count">—</span></p>
+      <p><strong>Last update:</strong> <span id="last-update">Fetching…</span></p>
+      <p id="status-message"></p>
     </div>
-  </div>
-  <p class="caption">Codex created this 3D cube</p>
-</body>
+
+    <script>
+      const EARTH_RADIUS_KM = 6371;
+      const EARTH_RADIUS_PIXELS = 220;
+      const CAMERA_DISTANCE = EARTH_RADIUS_PIXELS * 3.4;
+      const ALTITUDE_SCALE = EARTH_RADIUS_PIXELS / EARTH_RADIUS_KM;
+      const API_URL = "https://api.celestek.com/v1/satellites/starlink";
+      const REFRESH_INTERVAL = 60_000;
+
+      const FALLBACK_SATELLITES = [
+        { id: "fallback-1", latitude: 34.05, longitude: -118.25, altitudeKm: 550 },
+        { id: "fallback-2", latitude: -12.05, longitude: 96.88, altitudeKm: 555 },
+        { id: "fallback-3", latitude: 48.85, longitude: 2.35, altitudeKm: 545 },
+        { id: "fallback-4", latitude: 1.35, longitude: 103.82, altitudeKm: 560 },
+        { id: "fallback-5", latitude: 35.68, longitude: 139.69, altitudeKm: 540 },
+        { id: "fallback-6", latitude: -33.87, longitude: 151.21, altitudeKm: 565 }
+      ];
+
+      const statusElement = document.getElementById("status-message");
+      const lastUpdateElement = document.getElementById("last-update");
+      const satelliteCountElement = document.getElementById("satellite-count");
+
+      function setStatus(message, variant) {
+        statusElement.textContent = message;
+        statusElement.classList.remove("status-error", "status-info");
+        if (variant) {
+          statusElement.classList.add(variant);
+        }
+      }
+
+      const canvas = document.getElementById("globe-canvas");
+      const context = canvas.getContext("2d");
+
+      let width = window.innerWidth;
+      let height = window.innerHeight;
+
+      function resizeCanvas() {
+        width = window.innerWidth;
+        height = window.innerHeight;
+        canvas.width = width * window.devicePixelRatio;
+        canvas.height = height * window.devicePixelRatio;
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+        context.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
+      }
+
+      resizeCanvas();
+      window.addEventListener("resize", resizeCanvas);
+
+      const stars = new Array(1400).fill(null).map(() => ({
+        angle: Math.random() * Math.PI * 2,
+        distance: EARTH_RADIUS_PIXELS * (3 + Math.random() * 2.5),
+        size: 0.6 + Math.random() * 1.4,
+        twinkleOffset: Math.random() * Math.PI * 2
+      }));
+
+      const lightDirection = normalize({ x: -0.6, y: 0.4, z: 1 });
+
+      function normalize(vector) {
+        const length = Math.hypot(vector.x, vector.y, vector.z);
+        return { x: vector.x / length, y: vector.y / length, z: vector.z / length };
+      }
+
+      function latLonAltToVector(latitude, longitude, altitudeKm) {
+        const phi = (90 - latitude) * (Math.PI / 180);
+        const theta = (longitude + 180) * (Math.PI / 180);
+        const radius = EARTH_RADIUS_PIXELS + Math.max(0, altitudeKm) * ALTITUDE_SCALE;
+        const sinPhi = Math.sin(phi);
+        return {
+          x: radius * sinPhi * Math.cos(theta),
+          y: radius * Math.cos(phi),
+          z: radius * sinPhi * Math.sin(theta)
+        };
+      }
+
+      function rotateVector(vector, rotationX, rotationY) {
+        const cosY = Math.cos(rotationY);
+        const sinY = Math.sin(rotationY);
+        const cosX = Math.cos(rotationX);
+        const sinX = Math.sin(rotationX);
+
+        const x1 = vector.x * cosY - vector.z * sinY;
+        const z1 = vector.x * sinY + vector.z * cosY;
+        const y1 = vector.y;
+
+        const y2 = y1 * cosX - z1 * sinX;
+        const z2 = y1 * sinX + z1 * cosX;
+
+        return { x: x1, y: y2, z: z2 };
+      }
+
+      function project(vector) {
+        const scale = CAMERA_DISTANCE / (CAMERA_DISTANCE - vector.z);
+        return {
+          x: width / 2 + vector.x * scale,
+          y: height / 2 + 50 + vector.y * scale,
+          scale
+        };
+      }
+
+      function drawBackground(time) {
+        const gradient = context.createRadialGradient(
+          width * 0.3,
+          height * 0.2,
+          Math.min(width, height) * 0.1,
+          width / 2,
+          height / 2,
+          Math.max(width, height)
+        );
+        gradient.addColorStop(0, "#091530");
+        gradient.addColorStop(0.45, "#050a1b");
+        gradient.addColorStop(1, "#01020a");
+        context.fillStyle = gradient;
+        context.fillRect(0, 0, width, height);
+
+        context.save();
+        context.translate(width / 2, height / 2 + 50);
+        stars.forEach((star) => {
+          const twinkle = 0.4 + 0.6 * Math.sin(time * 0.0015 + star.twinkleOffset);
+          const size = star.size * Math.max(0.2, twinkle);
+          const x = Math.cos(star.angle) * star.distance;
+          const y = Math.sin(star.angle) * star.distance * 0.6;
+          context.globalAlpha = 0.65;
+          context.fillStyle = "#e7efff";
+          context.beginPath();
+          context.arc(x, y, size, 0, Math.PI * 2);
+          context.fill();
+        });
+        context.restore();
+      }
+
+      function drawAtmosphere() {
+        const radius = EARTH_RADIUS_PIXELS * 1.05;
+        const gradient = context.createRadialGradient(
+          width / 2,
+          height / 2 - 40,
+          radius * 0.3,
+          width / 2,
+          height / 2 + 50,
+          radius
+        );
+        gradient.addColorStop(0, "rgba(120, 170, 255, 0.25)");
+        gradient.addColorStop(1, "rgba(5, 15, 35, 0)");
+        context.fillStyle = gradient;
+        context.beginPath();
+        context.arc(width / 2, height / 2 + 50, radius, 0, Math.PI * 2);
+        context.fill();
+      }
+
+      const continentShapes = [
+        {
+          fill: "rgba(86, 180, 197, 0.7)",
+          outline: "rgba(26, 92, 120, 0.7)",
+          points: [
+            [72, -170],
+            [70, -150],
+            [65, -120],
+            [58, -105],
+            [48, -90],
+            [35, -80],
+            [25, -90],
+            [15, -105],
+            [5, -110],
+            [-15, -80],
+            [-40, -70],
+            [-55, -60],
+            [-55, -40],
+            [-45, -20],
+            [-20, -10],
+            [0, -30],
+            [20, -45],
+            [40, -70],
+            [58, -90],
+            [72, -120],
+            [72, -170]
+          ]
+        },
+        {
+          fill: "rgba(82, 196, 178, 0.75)",
+          outline: "rgba(22, 92, 88, 0.7)",
+          points: [
+            [72, -20],
+            [65, -10],
+            [60, 20],
+            [50, 35],
+            [45, 60],
+            [40, 90],
+            [30, 110],
+            [20, 120],
+            [10, 130],
+            [0, 110],
+            [-10, 100],
+            [-20, 80],
+            [-30, 60],
+            [-35, 35],
+            [-30, 10],
+            [-20, -10],
+            [-5, -20],
+            [10, -10],
+            [20, 0],
+            [35, 10],
+            [50, -5],
+            [60, -15],
+            [72, -20]
+          ]
+        },
+        {
+          fill: "rgba(89, 204, 160, 0.75)",
+          outline: "rgba(24, 92, 72, 0.7)",
+          points: [
+            [12, -60],
+            [5, -55],
+            [-10, -50],
+            [-20, -40],
+            [-30, -35],
+            [-35, -30],
+            [-45, -35],
+            [-55, -45],
+            [-60, -50],
+            [-60, -60],
+            [-50, -70],
+            [-35, -75],
+            [-15, -70],
+            [5, -65],
+            [12, -60]
+          ]
+        },
+        {
+          fill: "rgba(90, 188, 205, 0.7)",
+          outline: "rgba(26, 90, 118, 0.65)",
+          points: [
+            [-10, 140],
+            [-15, 150],
+            [-25, 160],
+            [-30, 155],
+            [-32, 150],
+            [-28, 142],
+            [-20, 138],
+            [-10, 140]
+          ]
+        }
+      ];
+
+      function drawContinents(rotationX, rotationY) {
+        continentShapes.forEach((shape) => {
+          const projectedPoints = [];
+          const depthValues = [];
+          shape.points.forEach(([lat, lon]) => {
+            const surfaceVector = latLonAltToVector(lat, lon, -10);
+            const rotated = rotateVector(surfaceVector, rotationX, rotationY);
+            if (rotated.z <= 0) {
+              projectedPoints.push(null);
+              depthValues.push(rotated.z);
+              return;
+            }
+            const projected = project(rotated);
+            projectedPoints.push(projected);
+            depthValues.push(rotated.z);
+          });
+
+          const visible = depthValues.some((z) => z > 0);
+          if (!visible) {
+            return;
+          }
+
+          context.beginPath();
+          projectedPoints.forEach((point, index) => {
+            if (!point) {
+              if (index !== 0) {
+                context.stroke();
+                context.beginPath();
+              }
+              return;
+            }
+            if (index === 0 || !projectedPoints[index - 1]) {
+              context.moveTo(point.x, point.y);
+            } else {
+              context.lineTo(point.x, point.y);
+            }
+          });
+          context.closePath();
+          context.fillStyle = shape.fill;
+          context.fill();
+          context.strokeStyle = shape.outline;
+          context.lineWidth = 1;
+          context.stroke();
+        });
+      }
+
+      function drawEarth(rotationX, rotationY) {
+        const radius = EARTH_RADIUS_PIXELS;
+        const centerX = width / 2;
+        const centerY = height / 2 + 50;
+
+        const gradient = context.createRadialGradient(
+          centerX - radius * 0.42,
+          centerY - radius * 0.62,
+          radius * 0.18,
+          centerX,
+          centerY,
+          radius * 1.02
+        );
+        gradient.addColorStop(0, "#4fb9ff");
+        gradient.addColorStop(0.3, "#1f86ff");
+        gradient.addColorStop(0.65, "#0f4db8");
+        gradient.addColorStop(1, "#031a44");
+
+        context.save();
+        context.shadowColor = "rgba(5, 10, 35, 0.8)";
+        context.shadowBlur = 35;
+        context.beginPath();
+        context.arc(centerX, centerY, radius, 0, Math.PI * 2);
+        context.fillStyle = gradient;
+        context.fill();
+        context.restore();
+
+        const terminator = context.createLinearGradient(
+          centerX - radius,
+          centerY - radius,
+          centerX + radius,
+          centerY + radius
+        );
+        terminator.addColorStop(0, "rgba(0, 8, 20, 0.02)");
+        terminator.addColorStop(0.5, "rgba(0, 8, 20, 0.18)");
+        terminator.addColorStop(0.75, "rgba(0, 8, 20, 0.55)");
+        terminator.addColorStop(1, "rgba(0, 8, 20, 0.75)");
+        context.fillStyle = terminator;
+        context.beginPath();
+        context.arc(centerX, centerY, radius, 0, Math.PI * 2);
+        context.fill();
+
+        drawContinents(rotationX, rotationY);
+
+        const gloss = context.createRadialGradient(
+          centerX - radius * 0.55,
+          centerY - radius * 0.7,
+          radius * 0.08,
+          centerX - radius * 0.15,
+          centerY - radius * 0.35,
+          radius * 0.85
+        );
+        gloss.addColorStop(0, "rgba(255, 255, 255, 0.32)");
+        gloss.addColorStop(0.5, "rgba(255, 255, 255, 0.05)");
+        gloss.addColorStop(1, "rgba(255, 255, 255, 0)");
+        context.fillStyle = gloss;
+        context.beginPath();
+        context.arc(centerX, centerY, radius, 0, Math.PI * 2);
+        context.fill();
+
+        context.strokeStyle = "rgba(116, 188, 255, 0.35)";
+        context.lineWidth = 2;
+        context.beginPath();
+        context.arc(centerX, centerY, radius + 3, 0, Math.PI * 2);
+        context.stroke();
+      }
+
+      const satellites = new Map();
+      let lastSuccessfulFetch = null;
+
+      function updateSatellites(data) {
+        satellites.clear();
+        data.forEach((satellite) => {
+          const id =
+            satellite.satelliteId || satellite.noradId || satellite.id || satellite.name || crypto.randomUUID();
+          satellites.set(id, {
+            latitude: Number(satellite.latitude ?? satellite.lat ?? 0),
+            longitude: Number(satellite.longitude ?? satellite.lon ?? 0),
+            altitudeKm: Number(satellite.altitude_km ?? satellite.altitudeKm ?? satellite.altitude ?? 0)
+          });
+        });
+        satelliteCountElement.textContent = satellites.size.toLocaleString();
+      }
+
+      function drawSatellites(rotationX, rotationY) {
+        satellites.forEach((satellite) => {
+          const vector = latLonAltToVector(satellite.latitude, satellite.longitude, satellite.altitudeKm);
+          const rotated = rotateVector(vector, rotationX, rotationY);
+          if (rotated.z <= 0) {
+            return;
+          }
+          const projected = project(rotated);
+          const altitudeFactor = Math.min(1.4, 0.3 + (satellite.altitudeKm || 0) / 1200);
+          const brightness = Math.min(1, 0.65 + rotated.z / CAMERA_DISTANCE);
+          context.globalAlpha = 0.6 + 0.4 * brightness;
+          context.fillStyle = `rgba(${Math.floor(240 - 50 * altitudeFactor)}, ${Math.floor(
+            190 + 40 * altitudeFactor
+          )}, ${Math.floor(120)}, 1)`;
+          context.beginPath();
+          context.arc(projected.x, projected.y, 2.1 * projected.scale, 0, Math.PI * 2);
+          context.fill();
+          context.globalAlpha = 1;
+        });
+      }
+
+      async function fetchSatellitePositions() {
+        try {
+          setStatus("", null);
+          const response = await fetch(API_URL, { cache: "no-store" });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status} – ${response.statusText}`);
+          }
+          const payload = await response.json();
+          const constellation = Array.isArray(payload)
+            ? payload
+            : payload.satellites || payload.results || payload.data || [];
+          updateSatellites(constellation);
+          lastSuccessfulFetch = new Date();
+          lastUpdateElement.textContent = lastSuccessfulFetch.toLocaleTimeString();
+          setStatus("Live data from Celestek", "status-info");
+        } catch (error) {
+          console.error("Failed to fetch satellite data", error);
+          if (!lastSuccessfulFetch) {
+            updateSatellites(FALLBACK_SATELLITES);
+            lastUpdateElement.textContent = "Showing sample orbit";
+          } else {
+            lastUpdateElement.textContent = `${lastSuccessfulFetch.toLocaleTimeString()} (cached)`;
+          }
+          setStatus(
+            "Unable to refresh live satellite positions right now. Displaying cached data.",
+            "status-error"
+          );
+        }
+      }
+
+      let rotationX = 0.3;
+      let rotationY = 0;
+      let velocityX = 0;
+      let velocityY = 0;
+      let autoRotation = 0.00012;
+      let lastFrameTime = performance.now();
+      let autoRotationResumeAt = performance.now();
+      let isDragging = false;
+      let lastPointerX = 0;
+      let lastPointerY = 0;
+
+      function animate(now) {
+        try {
+          const delta = now - lastFrameTime;
+          lastFrameTime = now;
+
+          if (performance.now() > autoRotationResumeAt && !isDragging) {
+            rotationY += autoRotation * delta;
+          }
+
+          rotationX += velocityX;
+          rotationY += velocityY;
+          velocityX *= 0.92;
+          velocityY *= 0.92;
+          rotationX = Math.max(-0.9, Math.min(0.9, rotationX));
+
+          drawBackground(now);
+          drawAtmosphere();
+          drawEarth(rotationX, rotationY);
+          drawSatellites(rotationX, rotationY);
+        } catch (error) {
+          console.error("Animation error", error);
+        }
+
+        requestAnimationFrame(animate);
+      }
+
+      canvas.addEventListener("pointerdown", (event) => {
+        isDragging = true;
+        lastPointerX = event.clientX;
+        lastPointerY = event.clientY;
+        autoRotationResumeAt = performance.now() + 4000;
+        canvas.setPointerCapture(event.pointerId);
+      });
+
+      canvas.addEventListener("pointermove", (event) => {
+        if (!isDragging) {
+          return;
+        }
+        const deltaX = event.clientX - lastPointerX;
+        const deltaY = event.clientY - lastPointerY;
+        rotationY += deltaX * 0.005;
+        rotationX += deltaY * 0.003;
+        rotationX = Math.max(-0.9, Math.min(0.9, rotationX));
+        velocityY = deltaX * 0.0003;
+        velocityX = deltaY * 0.0003;
+        lastPointerX = event.clientX;
+        lastPointerY = event.clientY;
+      });
+
+      function endDrag(event) {
+        if (!isDragging) {
+          return;
+        }
+        isDragging = false;
+        canvas.releasePointerCapture(event.pointerId);
+        autoRotationResumeAt = performance.now() + 4000;
+      }
+
+      canvas.addEventListener("pointerup", endDrag);
+      canvas.addEventListener("pointercancel", endDrag);
+
+      function initialiseScene() {
+        setStatus("Rendering Earth…", "status-info");
+        updateSatellites(FALLBACK_SATELLITES);
+        lastUpdateElement.textContent = "Awaiting live data…";
+        setStatus("Earth ready. Loading latest data from Celestek…", "status-info");
+        fetchSatellitePositions();
+        setInterval(fetchSatellitePositions, REFRESH_INTERVAL);
+        requestAnimationFrame(animate);
+      }
+
+      initialiseScene();
+    </script>
+  </body>
 </html>
